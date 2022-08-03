@@ -8,6 +8,13 @@ In your own code please run `npm install starknet@next` for the latest version o
 
 `node index.js`
 
+## Videos:
+This workshop, along with general info about starknet.js, is shown in videos below:
+
+- https://www.youtube.com/watch?v=gqj0ENOE0EE
+  
+- https://youtu.be/6jGlDBRvckU?t=2167
+
 ## Questions?
 
 Ask in #starknet-js channel in the [StarkNet Discord ](discord.gg/uJ9HZTUk2Y)
