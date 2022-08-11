@@ -1,32 +1,25 @@
 import fs from "fs";
+import readline from "readline";
 
 // Install the latest version of starknet with npm install starknet@next and import starknet
 import {
-  Contract,
   Account,
+  Contract,
   defaultProvider,
   ec,
-  encode,
-  hash,
   json,
-  number,
   stark,
   Provider,
+  number
 } from "starknet";
-import { transformCallsToMulticallArrays } from "./node_modules/starknet/utils/transaction.js";
 
 const provider = process.env.STARKNET_PROVIDER_BASE_URL === undefined ?
   defaultProvider :
   new Provider({ baseUrl: process.env.STARKNET_PROVIDER_BASE_URL });
 
-// TODO: Change to OZ account contract
-console.log("Reading Argent Account Contract...");
-const compiledArgentAccount = json.parse(
-  fs.readFileSync("./ArgentAccount.json").toString("ascii")
-);
-console.log("Reading ERC20 Contract...");
-const compiledErc20 = json.parse(
-  fs.readFileSync("./ERC20.json").toString("ascii")
+console.log("Reading OpenZeppelin Account Contract...");
+const compiledOZAccount = json.parse(
+  fs.readFileSync("./OZAccount.json").toString("ascii")
 );
 
 // Since there are no Externally Owned Accounts (EOA) in StarkNet,
@@ -42,38 +35,57 @@ const privateKey = stark.randomAddress();
 const starkKeyPair = ec.genKeyPair(privateKey);
 const starkKeyPub = ec.getStarkKey(starkKeyPair);
 
-// Deploy the Account contract and wait for it to be verified on StarkNet.
+// // Deploy the Account contract and wait for it to be verified on StarkNet.
 console.log("Deployment Tx - Account Contract to StarkNet...");
 const accountResponse = await provider.deployContract({
-  contract: compiledArgentAccount,
+  contract: compiledOZAccount,
+  constructorCalldata: [starkKeyPub],
   addressSalt: starkKeyPub,
 });
 
+// You can also check this address on https://goerli.voyager.online/
+console.log("Account address ", accountResponse.contract_address);
+
 // Wait for the deployment transaction to be accepted on StarkNet
 console.log(
-  "Waiting for Tx to be Accepted on Starknet - Argent Account Deployment..."
+  "Waiting for Tx to be Accepted on Starknet - OpenZeppelin Account Deployment..."
 );
 await provider.waitForTransaction(accountResponse.transaction_hash);
 
-const accountContract = new Contract(
-  compiledArgentAccount.abi,
-  accountResponse.address,
-  provider
-);
+function askQuestion(query) {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+    });
+  
+    return new Promise(resolve => rl.question(query, ans => {
+        rl.close();
+        resolve(ans);
+    }))
+  }
 
-// Initialize argent account
-console.log("Invoke Tx - Initialize Argnet Account...");
-const initializeResponse = await accountContract.initialize(starkKeyPub, "0");
-console.log(
-  "Waiting for Tx to be Accepted on Starknet - Initialize Account..."
-);
-await provider.waitForTransaction(initializeResponse.transaction_hash);
+////////////////////////////////////////////////////////////////////////////////
+// IMPORTANT: you need to fund your newly created account before you use it. 
+// You can do so by using a faucet:
+// https://faucet.goerli.starknet.io/
+////////////////////////////////////////////////////////////////////////////////
+
+const ans = await askQuestion("Did you add funds to your Account? Hit enter if yes");
+
+////////////////
+//// PART 2 ////
+////////////////
 
 // Use your new account address
 const account = new Account(
-  provider,
-  accountResponse.address,
-  starkKeyPair
+    provider,
+    accountResponse.contract_address,
+    starkKeyPair
+  );
+
+console.log("Reading ERC20 Contract...");
+const compiledErc20 = json.parse(
+  fs.readFileSync("./ERC20.json").toString("ascii")
 );
 
 // Deploy an ERC20 contract and wait for it to be verified on StarkNet.
@@ -87,16 +99,25 @@ console.log("Waiting for Tx to be Accepted on Starknet - ERC20 Deployment...");
 await provider.waitForTransaction(erc20Response.transaction_hash);
 
 // Get the erc20 contract address
-const erc20Address = erc20Response.address;
+const erc20Address = erc20Response.contract_address;
+console.log("ERC20 Address: ", erc20Address);
 
 // Create a new erc20 contract object
 const erc20 = new Contract(compiledErc20.abi, erc20Address, provider);
+
+erc20.connect(account);
 
 // Mint 1000 tokens to account address
 console.log(`Invoke Tx - Minting 1000 tokens to ${account.address}...`);
 const { transaction_hash: mintTxHash } = await erc20.mint(
   account.address,
-  "1000"
+  "1000",
+  { 
+    // transaction can be rejected if maxFee is lower than actual
+    // Error: REJECTED: FEE_TRANSFER_FAILURE
+    // Actual fee exceeded max fee.
+    maxFee: "999999995330000" 
+  }
 );
 
 // Wait for the invoke transaction to be accepted on StarkNet
@@ -121,7 +142,9 @@ const { code, transaction_hash: transferTxHash } = await account.execute(
     calldata: [erc20Address, "10"],
   },
   undefined,
-  { maxFee: "0" }
+  { 
+    maxFee: "999999995330000" 
+  }
 );
 
 // Wait for the invoke transaction to be accepted on StarkNet
